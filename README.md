@@ -200,6 +200,22 @@ Result: no rows returned — no logons occurred on this host after isolation. (N
 
 ---
 
+## MITRE ATT&CK Mapping
+
+The activity observed in this incident closely matches a pattern well-documented in threat intelligence: opportunistic, internet-scanning-driven attacks against exposed database services, where automated tooling discovers an open port, brute-forces default or weak credentials, and — rather than deploying traditional ransomware — wipes the data outright and leaves an extortion note demanding payment for its "return." This is distinct from a targeted ransomware operator; the credential-guessing pattern spread across 13 unrelated source IPs, the templated ransom-note wording, and the destructive rather than encrypting payload all point to mass, automated tooling rather than a human operator specifically targeting this host.
+
+| Tactic | Technique | ID | Evidence in this incident |
+|---|---|---|---|
+| Reconnaissance | Active Scanning | T1595 | 13 distinct source IPs authenticating against default-style usernames (`root`, `sa`, `admin`) within a short window — consistent with mass internet-wide port scanning rather than targeted recon |
+| Credential Access | Brute Force | T1110 | 104 MySQL authentication events (45 failures, 59 successes) across those same 13 IPs |
+| Initial Access / Persistence | Valid Accounts | T1078 | Bait credential `root@'%'` (password `root`) used to authenticate and drive all subsequent destructive activity |
+| Impact | Data Destruction | T1485 | All tables across the `lnp_corp`, `sakila`, and `world` schemas dropped |
+| Impact | Extortion via ransom note | — | `RECOVER_YOUR_DATA` table inserted post-deletion containing a Bitcoin payment demand, contact email, and unique DATAID reference |
+
+*Note: exact technique IDs should be cross-checked against the current MITRE ATT&CK matrix (attack.mitre.org) before citing in a resume, application, or formal writeup — sub-technique numbering is occasionally revised between ATT&CK versions.*
+
+---
+
 ## Timeline of Build Events
 
 1. **VM Deployed** — Windows 11 VM created in its own resource group, Deny-All-Inbound NSG, onboarded to MDE.
