@@ -1,5 +1,7 @@
 # Live-Exposed Honeypot: End-to-End Breach Detection & Incident Response with Microsoft Defender
 
+<img width="700" src="screenshots/ir-lifecycle-diagram.png" alt="NIST incident response lifecycle: Preparation, Detection & Analysis, Containment/Eradication/Recovery, Post-Incident Activity"/>
+
 # Incident Report: Unauthorized Access & Data Destruction — CORP-112-309
 
 ## Platforms and Languages Leveraged
