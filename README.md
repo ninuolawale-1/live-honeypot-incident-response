@@ -48,8 +48,41 @@ Built two Sentinel Analytics Rules while the environment was still clean:
 - A rule detecting successful logons to the bait `administrator`/`guest` accounts on the VM.
 - A rule parsing the raw MySQL connection log to detect successful authentications, distinguishing them from failed attempts via connection-ID correlation.
 
-This is the query that ultimately flagged the real compromise:
+Full text of both rules, and every other query used in this project, is in the **KQL Detection Queries** section below, each immediately followed by its result screenshot.
 
+### 5. Deliberately Weakened and Exposed the Environment
+
+Only after the detections above were confirmed quiet against a clean baseline: enabled a weak local `administrator` account, enabled a blank-password `guest` account with RDP access, created a second network-reachable MySQL account (`root@'%'`, password `root`) as bait, disabled the Windows Firewall, and opened the NSG to Allow-All-Inbound. The exact exposure timestamp was recorded to mark the start of the incident window.
+
+### 6. Detected the Breach
+
+Within hours, the MySQL bait account was brute-forced from 13 distinct external IPs. Two sessions escalated to full schema destruction: one enumerated and dropped every table across all three schemas, a second recreated a `RECOVER_YOUR_DATA` table and inserted a Bitcoin ransom note, then modified the bait account's privileges. Separately, the local `administrator` account was successfully logged into over RDP from an external IP — a distinct compromise on the Windows side.
+
+<img width="700" src="screenshots/IR-04-ransom-note.png" alt="Screenshot: Ransom note left inside the compromised MySQL database"/>
+
+The ransom note referenced an external landing page, accessed for evidence-gathering purposes only (no payment or contact made), which detailed the extortion group's payment instructions and a secondary Telegram contact channel:
+
+<img width="700" src="screenshots/IR-04-ransom-landing-page.png" alt="Screenshot: External extortion landing page referenced in the ransom note"/>
+
+The detection queries that surfaced this activity — the standing analytics rules, the MySQL query-activity check, the bait-account logon check, and the outbound-traffic check — are documented with their full query text and result screenshots in the **KQL Detection Queries** section below.
+
+A follow-up hunt checking whether the `administrator` RDP session was followed by any hands-on-keyboard process activity returned zero rows — the successful logon was not followed by observable interactive activity in the following six hours. See that query in the KQL section as well.
+
+### 7. Contained the Breach
+
+Isolated the VM in Microsoft Defender for Endpoint (full isolation) and captured a second Investigation Package for before/after forensic comparison against the one taken pre-exposure. Confirmed no further logons occurred on the host after isolation — see the post-isolation containment check in the KQL section below.
+
+### 8. Eradicated and Recovered
+
+Chose to harden and restore rather than destroy and rebuild: reverted the NSG, re-enabled the Windows Firewall, ran a full Defender malware scan, deleted the bait `administrator` account, disabled `guest`, rotated the primary local account to strong credentials, closed MySQL off from the public internet, remediated the bait `root@'%'` account, and restored the MySQL schema from the original seed data.
+
+---
+
+## KQL Detection Queries
+
+All queries below were actually run against this environment (not hypothetical examples), each scoped to this VM's device name or resource ID to isolate results within the shared Log Analytics Workspace. Each query is immediately followed by its result screenshot.
+
+**Standing rule — successful MySQL logon (`sql-breach-corp-112-309`).** This is the query that flagged the real compromise.
 ```kql
 // Rule: sql-breach-corp-112-309
 let MyDevice = "corp-112-309";
@@ -81,56 +114,9 @@ MySQLAudit_CL
 | project TimeGenerated, DeviceName, Username, IpAddress, ActionType, RawData
 | order by TimeGenerated desc
 ```
-
 <img width="700" src="screenshots/IR-02-sql-breach-rule.png" alt="Screenshot: sql-breach-corp-112-309 query results showing successful MySQL logons"/>
 
-### 5. Deliberately Weakened and Exposed the Environment
-
-Only after the detections above were confirmed quiet against a clean baseline: enabled a weak local `administrator` account, enabled a blank-password `guest` account with RDP access, created a second network-reachable MySQL account (`root@'%'`, password `root`) as bait, disabled the Windows Firewall, and opened the NSG to Allow-All-Inbound. The exact exposure timestamp was recorded to mark the start of the incident window.
-
-### 6. Detected the Breach
-
-Within hours, the MySQL bait account was brute-forced from 13 distinct external IPs. Two sessions escalated to full schema destruction: one enumerated and dropped every table across all three schemas, a second recreated a `RECOVER_YOUR_DATA` table and inserted a Bitcoin ransom note, then modified the bait account's privileges. Separately, the local `administrator` account was successfully logged into over RDP from an external IP — a distinct compromise on the Windows side.
-
-<img width="700" src="screenshots/IR-04-ransom-note.png" alt="Screenshot: Ransom note left inside the compromised MySQL database"/>
-
-The ransom note referenced an external landing page, accessed for evidence-gathering purposes only (no payment or contact made), which detailed the extortion group's payment instructions and a secondary Telegram contact channel:
-
-<img width="700" src="screenshots/IR-04-ransom-landing-page.png" alt="Screenshot: External extortion landing page referenced in the ransom note"/>
-
-The standing VM logon detection rule confirmed the successful `administrator` compromise:
-
-<img width="700" src="screenshots/IR-08a-admin-guest-rule.png" alt="Screenshot: Admin-Guest-Breach-corp-112-309 rule results showing successful administrator logon"/>
-
-Query-level activity on the MySQL side showed the full attacker session, from initial connection through schema enumeration:
-
-<img width="700" src="screenshots/IR-08b-mysql-query-activity.png" alt="Screenshot: MySQL query activity results showing attacker commands"/>
-
-An ad hoc check for successful bait-account logons during the exposure window corroborated the same finding:
-
-<img width="700" src="screenshots/IR-08c-vm-logon-check.png" alt="Screenshot: VM logon check results, filtered to bait accounts and exposure window"/>
-
-A check of denied outbound network flows found no attacker-attributable command-and-control or exfiltration attempts — only benign NTP traffic from the host itself:
-
-<img width="700" src="screenshots/IR-08d-netanalytics-denied.png" alt="Screenshot: NTANetAnalytics results showing only benign denied outbound flows"/>
-
-A follow-up hunt checking whether the `administrator` RDP session was followed by any hands-on-keyboard process activity returned zero rows — the successful logon was not followed by observable interactive activity in the following six hours.
-
-### 7. Contained the Breach
-
-Isolated the VM in Microsoft Defender for Endpoint (full isolation) and captured a second Investigation Package for before/after forensic comparison against the one taken pre-exposure. Confirmed no further logons occurred on the host after isolation.
-
-### 8. Eradicated and Recovered
-
-Chose to harden and restore rather than destroy and rebuild: reverted the NSG, re-enabled the Windows Firewall, ran a full Defender malware scan, deleted the bait `administrator` account, disabled `guest`, rotated the primary local account to strong credentials, closed MySQL off from the public internet, remediated the bait `root@'%'` account, and restored the MySQL schema from the original seed data.
-
----
-
-## KQL Detection Queries
-
-All queries below were actually run against this environment (not hypothetical examples), each scoped to this VM's device name or resource ID to isolate results within the shared Log Analytics Workspace.
-
-**Standing rule — successful VM logon to bait accounts (`Admin-Guest-Breach-corp-112-309`):**
+**Standing rule — successful VM logon to bait accounts (`Admin-Guest-Breach-corp-112-309`).**
 ```kql
 // Rule: Admin-Guest-Breach-corp-112-309
 let MyDevice = "corp-112-309"; // MDE Truncates/cuts off the device name
@@ -140,10 +126,9 @@ DeviceLogonEvents
 | where ActionType == "LogonSuccess"
 | project TimeGenerated, RemoteIP, AccountName, DeviceName, ActionType, LogonType
 ```
+<img width="700" src="screenshots/IR-08a-admin-guest-rule.png" alt="Screenshot: Admin-Guest-Breach-corp-112-309 rule results showing successful administrator logon"/>
 
-**Standing rule — successful MySQL logon (`sql-breach-corp-112-309`):** the query that flagged the compromise; full text and screenshot in Step 4 above.
-
-**MySQL query-level activity from the point of exposure onward:**
+**MySQL query-level activity from the point of exposure onward.**
 ```kql
 // MySQL query activity, parsed from RawData
 let MyDevice = "corp-112-309";
@@ -159,8 +144,9 @@ MySQLAudit_CL
 | project TimeGenerated, DeviceName, ActionType, Query, RawData
 | order by TimeGenerated desc
 ```
+<img width="700" src="screenshots/IR-08b-mysql-query-activity.png" alt="Screenshot: MySQL query activity results showing attacker commands"/>
 
-**Ad hoc check — successful bait-account VM logons during active monitoring:**
+**Ad hoc check — successful bait-account VM logons during active monitoring.**
 ```kql
 // VM logons — filtered to bait accounts (administrator, guest)
 let MyDevice = "corp-112-309";
@@ -172,8 +158,9 @@ DeviceLogonEvents
 | where AccountName in~ ("administrator", "guest")
 | project TimeGenerated, RemoteIP, AccountName, DeviceName, ActionType, LogonType;
 ```
+<img width="700" src="screenshots/IR-08c-vm-logon-check.png" alt="Screenshot: VM logon check results, filtered to bait accounts and exposure window"/>
 
-**Denied outbound network flows (checking for attempted C2/exfiltration):**
+**Denied outbound network flows (checking for attempted C2/exfiltration).**
 ```kql
 // NTANetAnalytics — denied outbound flows from the host
 let MyDevice = "corp-112-309";
@@ -183,9 +170,11 @@ NTANetAnalytics
 | where DeniedOutFlows >= 1
 | project TimeGenerated, DeviceName = MyDevice, FlowType, FlowStatus, SrcIp, SrcPorts, DestIp, DestPort
 ```
+<img width="700" src="screenshots/IR-08d-netanalytics-denied.png" alt="Screenshot: NTANetAnalytics results showing only benign denied outbound flows"/>
+
 Result: 5 denied flows, all benign NTP (UDP/123) from the host itself — no attacker-attributable outbound activity.
 
-**Ad hoc hunt — administrator-attributed process activity following the RDP logon:**
+**Ad hoc hunt — administrator-attributed process activity following the RDP logon.**
 ```kql
 let MyDevice = "corp-112-309";
 let LogonTime = todatetime("2026-08-13T11:46:03Z");
@@ -195,9 +184,9 @@ DeviceProcessEvents
 | where AccountName =~ "administrator" or InitiatingProcessAccountName =~ "administrator"
 | project TimeGenerated, AccountName, FileName, ProcessCommandLine
 ```
-Result: no rows returned — the successful RDP logon was not followed by observable hands-on-keyboard activity.
+Result: no rows returned — the successful RDP logon was not followed by observable hands-on-keyboard activity. (No screenshot for this query — an empty result set has nothing to capture.)
 
-**Post-isolation containment check:**
+**Post-isolation containment check.**
 ```kql
 let MyDevice = "corp-112-309";
 let IsolationTime = todatetime("2026-08-13T21:58:22.9317788Z");
@@ -207,7 +196,7 @@ DeviceLogonEvents
 | project TimeGenerated, AccountName, RemoteIP, ActionType, LogonType
 | order by TimeGenerated asc
 ```
-Result: no rows returned — no logons occurred on this host after isolation.
+Result: no rows returned — no logons occurred on this host after isolation. (No screenshot for this query — an empty result set has nothing to capture.)
 
 ---
 
@@ -226,7 +215,7 @@ Result: no rows returned — no logons occurred on this host after isolation.
 
 ## Summary
 
-This project stood up a Windows 11 + MySQL honeypot inside a live, internet-facing cyber range environment, instrumented it end-to-end with Microsoft Defender for Endpoint and a custom MySQL log pipeline into Microsoft Sentinel, and authored detection rules *before* any deliberate exposure — so that a real compromise, when it happened, would be caught by design. It was: within hours of exposure, an automated actor brute-forced a bait MySQL account, destroyed three schemas, and left a Bitcoin ransom note, while a separate successful RDP logon compromised the bait `administrator` account. The full incident — detection, IOC extraction, timeline reconstruction, containment, and eradication — was documented in a formal incident report, grounded entirely in real telemetry pulled from `MySQLAudit_CL`, `DeviceLogonEvents`, `DeviceProcessEvents`, and `NTANetAnalytics`.
+This project stood up a Windows 11 + MySQL honeypot inside a live, internet-facing cyber range environment, instrumented it end-to-end with Microsoft Defender for Endpoint and a custom MySQL log pipeline into Microsoft Sentinel, and authored detection rules *before* any deliberate exposure — so that a real compromise, when it happened, would be caught by design. Within hours of exposure, an automated actor brute-forced a bait MySQL account, destroyed three schemas, and left a Bitcoin ransom note, while a separate successful RDP logon compromised the bait `administrator` account. The full incident — detection, IOC extraction, timeline reconstruction, containment, and eradication — was documented in a formal incident report, grounded entirely in real telemetry pulled from `MySQLAudit_CL`, `DeviceLogonEvents`, `DeviceProcessEvents`, and `NTANetAnalytics`.
 
 ---
 
